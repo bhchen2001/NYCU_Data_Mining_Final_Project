@@ -1,2 +1,11 @@
 # NYCU_Data_Mining_Final_Project
-book recommendation system with reader review analyze
+
+## Usage
+
+```
+python main.py -d %dataset dir% -m %recommand method% -k %nearest neighbor num%
+``````
+### example
+```
+python main.py -d ../dataset -m user_based_cf -k 20
+```

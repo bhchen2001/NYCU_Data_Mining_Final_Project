@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import json
+import math
 
 class ReaderDFBuilder():
     """
@@ -18,7 +19,7 @@ class ReaderDFBuilder():
     Read the data
     """
     def load_data(self):
-        self.data = pd.read_csv(self.data_path + 'validate_data.csv')
+        self.data = pd.read_csv(self.data_path + 'validate_data_with_bert.csv')
 
     """
     Show the Processed Data Details
@@ -141,18 +142,56 @@ class ReaderDFBuilder():
                 # test_df = tmp_df.sort_values(by=['review/time'], ascending=False).head(int(tmp_df.shape[0] / 2))
                 # tmp_df = tmp_df.drop(test_df.index)
 
-                # buying list for each reader sorted by review score
+                """
+                consider both review score and bert score
+                """
+                # buying list for each reader sorted by bert score * review score
+                # test_df['combined_score'] = test_df.apply(lambda x: math.sqrt(x['bert_score'] * x['review/score']), axis=1)
+                # tmp_df['combined_score'] = tmp_df.apply(lambda x: math.sqrt(x['bert_score'] * x['review/score']), axis=1)
+
+                # buying list for each reader sorted by bert score *0.5 + review score * 0.5
+                test_df['combined_score'] = test_df.apply(lambda x: x['bert_score'] * 0.3 + x['review/score'] * 0.7, axis=1)
+                tmp_df['combined_score'] = tmp_df.apply(lambda x: x['bert_score'] * 0.3 + x['review/score'] * 0.7, axis=1)
+
                 test_reader_buying_list[reader] = [[], []]
-                test_reader_buying_list[reader][0] = test_df.sort_values(by=['review/score'], ascending=False)['Id'].tolist()
-                test_reader_buying_list[reader][1] = test_df.sort_values(by=['review/score'], ascending=False)['review/score'].tolist()
-                test_reader_bought_list[reader] = [[], []]
-                test_reader_bought_list[reader][0] = tmp_df.sort_values(by=['review/score'], ascending=False)['Id'].tolist()
-                test_reader_bought_list[reader][1] = tmp_df.sort_values(by=['review/score'], ascending=False)['review/score'].tolist()
-            elif reader in train_reader_id_list:
+
                 # buying list for each reader sorted by review score
+                # test_reader_buying_list[reader][0] = test_df.sort_values(by=['review/score'], ascending=False)['Title'].tolist()
+                # test_reader_buying_list[reader][1] = test_df.sort_values(by=['review/score'], ascending=False)['review/score'].tolist()
+
+                # test_reader_buying_list[reader][0] = test_df.sort_values(by=['bert_score'], ascending=False)['Title'].tolist()
+                # test_reader_buying_list[reader][1] = test_df.sort_values(by=['bert_score'], ascending=False)['bert_score'].tolist()
+
+                test_reader_buying_list[reader][0] = test_df.sort_values(by=['combined_score'], ascending=False)['Title'].tolist()
+                test_reader_buying_list[reader][1] = test_df.sort_values(by=['combined_score'], ascending=False)['combined_score'].tolist()
+                
+                test_reader_bought_list[reader] = [[], []]
+
+                # test_reader_bought_list[reader][0] = tmp_df.sort_values(by=['review/score'], ascending=False)['Title'].tolist()
+                # test_reader_bought_list[reader][1] = tmp_df.sort_values(by=['review/score'], ascending=False)['review/score'].tolist()
+
+                # test_reader_bought_list[reader][0] = tmp_df.sort_values(by=['bert_score'], ascending=False)['Title'].tolist()
+                # test_reader_bought_list[reader][1] = tmp_df.sort_values(by=['bert_score'], ascending=False)['bert_score'].tolist()
+
+                test_reader_bought_list[reader][0] = tmp_df.sort_values(by=['combined_score'], ascending=False)['Title'].tolist()
+                test_reader_bought_list[reader][1] = tmp_df.sort_values(by=['combined_score'], ascending=False)['combined_score'].tolist()
+            elif reader in train_reader_id_list:
+                """
+                consider both review score and bert score
+                """
+                # tmp_df['combined_score'] = tmp_df.apply(lambda x: math.sqrt(x['bert_score'] * x['review/score']), axis=1)
+                tmp_df['combined_score'] = tmp_df.apply(lambda x: x['bert_score'] * 0.3 + x['review/score'] * 0.7, axis=1)
+
                 train_reader_buying_list[reader] = [[], []]
-                train_reader_buying_list[reader][0] = tmp_df.sort_values(by=['review/score'], ascending=False)['Id'].tolist()
-                train_reader_buying_list[reader][1] = tmp_df.sort_values(by=['review/score'], ascending=False)['review/score'].tolist()
+                # buying list for each reader sorted by review score
+                # train_reader_buying_list[reader][0] = tmp_df.sort_values(by=['review/score'], ascending=False)['Title'].tolist()
+                # train_reader_buying_list[reader][1] = tmp_df.sort_values(by=['review/score'], ascending=False)['review/score'].tolist()
+
+                # train_reader_buying_list[reader][0] = tmp_df.sort_values(by=['bert_score'], ascending=False)['Title'].tolist()
+                # train_reader_buying_list[reader][1] = tmp_df.sort_values(by=['bert_score'], ascending=False)['bert_score'].tolist()
+
+                train_reader_buying_list[reader][0] = tmp_df.sort_values(by=['combined_score'], ascending=False)['Title'].tolist()
+                train_reader_buying_list[reader][1] = tmp_df.sort_values(by=['combined_score'], ascending=False)['combined_score'].tolist()
             attribute_dict['avg_helpfulness'].append(tmp_df['review/helpfulness'].mean())
             attribute_dict['start_buying_year'].append(tmp_df['publishedDate'].min())
             attribute_dict['end_buying_year'].append(tmp_df['publishedDate'].max())

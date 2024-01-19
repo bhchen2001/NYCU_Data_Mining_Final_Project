@@ -1,21 +1,21 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.model_selection import train_test_split
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import json
 
 from reader_df_builder import ReaderDFBuilder
 
-class UserBasedCF():
+class bookKMeans():
     """
     Constructor
     Input:
         data_path: 
             type: string
             description: the path of the data folder
-        similarity_method:
-            type: string
-            description: the similarity method used for finding similar users
-            example: "cosine_similarity"
         k:
             type: int
             description: the number of nearest neighbors
@@ -23,10 +23,11 @@ class UserBasedCF():
             type: int
             description: the number of recommended books
     """
-    def __init__(self, data_path, similarity_method, k = 3, recommend_num = 10):
-        self.similarity_method = similarity_method
-        self.k_nearest = int(k)
+    def __init__(self, data_path, cluster_num = 10, user_num = 10, recommend_num = 10):
         self.data_path = data_path
+        self.reader_list = None
+        self.cluster_num = cluster_num
+        self.user_num = user_num
         self.recommend_num = recommend_num
 
     """
@@ -36,47 +37,14 @@ class UserBasedCF():
         self.reader_list = pd.read_csv(self.data_path + 'validate_reader_id.csv')
 
     """
-    Find Similar Users Depend on the Similarity Method
-    Input:
-        test_reader_df:
-            type: pandas dataframe
-            description: the dataframe of the test reader
-        train_reader_df:
-            type: pandas dataframe
-            description: the dataframe of the train readers
-
-    Output:
-        similarity_list[:k_nearest]:
-            type: list
-            description: the list of k most similar users
-            example: [(user_id, similarity), ...]
-    """
-    def find_similar_users(self, test_reader_df, train_reader_df):
-        # drop the User_id feature
-        test_reader_df = test_reader_df.drop(['User_id'], axis = 1)
-        # find the similarity between test reader and all other train readers
-        similarity_list = []
-        if self.similarity_method == "cosine_similarity":
-            for index, train_df in train_reader_df.iterrows():
-                # drop the User_id column
-                user_id = train_df['User_id']
-                train_df = train_df.drop(['User_id'])
-                similarity = cosine_similarity(test_reader_df.values.reshape(1, -1), train_df.values.reshape(1, -1))
-                similarity_list.append((user_id, similarity[0][0]))
-        # sort the list by similarity
-        similarity_list.sort(key = lambda x: x[1], reverse = True)
-
-        # return the top k similar readers
-        return similarity_list[:self.k_nearest]
-    
-    """
     Recommend Books Depend on the Similar Users
         the recommended books are sorted by the occurence and average score
+        user_weight = 1 / (distance)
     Input:
         similar_users:
             type: list
             description: the list of similar users
-            example: [(user_id, similarity), ...]
+            example: [(user_id, distance), ...]
         train_bought_list:
             type: dict
             description: the buying list of train readers
@@ -94,8 +62,9 @@ class UserBasedCF():
         # for each similar user, find the books that he/she read
         # and calculate the occurence, total score and average score of each book
         recommend_book_dict = {}
-        for user in similar_users:
-            user_id, user_similarity = user[0], user[1]
+        for user_idx, user in enumerate(similar_users):
+            user_id, distance = user[0], user[1]
+            user_weight = 1 / (distance)
             user_buying_list = train_bought_list[user_id]
             for book_idx, book in enumerate(user_buying_list[0]):
                 if book in test_bought_list:
@@ -104,13 +73,13 @@ class UserBasedCF():
                 if book not in recommend_book_dict:
                     recommend_book_dict[book] = {
                         'occurence': 1,
-                        # the score also consider the similarity between users
-                        'score': user_buying_list[1][book_idx] * user_similarity,
+                        # the score also consider the distance between users
+                        'score': user_buying_list[1][book_idx] * user_weight,
                         'avg_score': 0
                     }
                 else:
                     recommend_book_dict[book]['occurence'] += 1
-                    recommend_book_dict[book]['score'] += user_buying_list[1][book_idx] * user_similarity
+                    recommend_book_dict[book]['score'] += user_buying_list[1][book_idx] * user_weight
         # calculate the average score of each book
         for book_id, book in recommend_book_dict.items():
             book['avg_score'] = book['score'] / book['occurence']
@@ -119,21 +88,37 @@ class UserBasedCF():
         # return the top r books id
         return [book[0] for book in recommend_book_list[:self.recommend_num]]
     
-    def recommend_books_secret(self, similar_users, train_bought_list, test_bought_list):
-        # for each similar user, create a list of books that he/she read
-        # for each list, sort the books by review score
-        recommend_book_list = []
-        for user in similar_users:
-            user_id, user_similarity = user[0], user[1]
-            user_buying_list = train_bought_list[user_id]
-            # sort the books by review score
-            sorted_books = sorted(zip(user_buying_list[0], user_buying_list[1]), key = lambda x: x[1], reverse = True)
-            # get the book id list
-            sorted_books = [book[0] for book in sorted_books]
-            # get the top 25 books
-            sorted_books = sorted_books[:10]
-            recommend_book_list.append(sorted_books)
-        return recommend_book_list
+    def user_similarity(self, user_a, user_b):
+        # similarity using cosine similarity
+        user_a = user_a.drop(['User_id'], axis=1)
+        user_b = user_b.drop(['User_id'], axis=1)
+        similarity = cosine_similarity(user_a.values.reshape(1, -1), user_b.values.reshape(1, -1))
+        return similarity[0][0]
+
+        # using euclidean distance
+        # return np.linalg.norm(user_a - user_b)
+
+    def plot_pca(self):
+
+        reader_df_builder = ReaderDFBuilder(self.data_path)
+        reader_df_builder.process()
+        train_reader_df, test_reader_df, train_bought_list, test_buying_list, test_bought_list = \
+            reader_df_builder.build_reader_df(self.reader_list['User_id'].tolist(), [])
+        
+        pca = PCA(n_components=2)
+        reduced_data = pca.fit_transform(train_reader_df.drop(['User_id'], axis=1))
+
+        model = KMeans(n_clusters = self.cluster_num, random_state=0)
+        model.fit(train_reader_df.drop(['User_id'], axis=1).to_numpy().tolist())
+        labels = model.labels_
+
+        plt.figure(figsize=(10, 8))
+        plt.scatter(reduced_data[:, 0], reduced_data[:, 1],marker='o')
+        plt.title('User Dsitribution with PCA')
+        plt.xlabel('PCA Component 1')
+        plt.ylabel('PCA Component 2')
+        plt.legend()
+        plt.show()    
     
     """
     MRR Criteria
@@ -158,15 +143,6 @@ class UserBasedCF():
             if book in target_book_list:
                 mrr_q = 1 / (idx + 1)
                 break
-        return mrr_q
-    
-    def mrr_criteria_secret(self, target_book_list, recommend_books):
-        mrr_q = 0
-        for book_list in recommend_books:
-            for idx, book in enumerate(book_list):
-                if book in target_book_list:
-                    mrr_q = 1 / (idx + 1)
-                    return mrr_q
         return mrr_q
     
     """
@@ -200,17 +176,18 @@ class UserBasedCF():
         return map_aveq, hit_location
 
     """
-    User Based Collaborative Filtering
-        1. split the data into training and testing set
+    kMeans Algorithm
+        1. split the data into training and testing
         2. build reader dataframe and buying list
-        3. for each user in the testing set, find the top k similar users in the training set
+        3. fit the kMeans model
+        4. for each user in the testing set, find the top k similar users in the training set
             and find the books that similar users read
-            then recommend the books to the target user
-        4. calculate the mrr and map score for the target user
-        5. output the average mrr and map score
+        5. calculate the mrr and map score for the target user
+        6. output the average mrr and map score
     """
-    def user_based_cf(self, n = 5):
-        # split the datagframe into chunks with same size n
+    def kMeans(self, n = 5):
+
+        # split the dataframe into chunks with same size n
         reader_id_chunks = np.array_split(self.reader_list, n)
 
         # cross validation
@@ -221,54 +198,67 @@ class UserBasedCF():
             print("[CV{}/{}]".format(fold_round + 1, n))
             # take the fold_round chunk as testing set
             test = reader_id_chunks[fold_round]
-
             # take the rest chunks as training set
             train = []
             for i in range(n):
                 if i != fold_round:
                     train.append(reader_id_chunks[i])
             train = pd.concat(train)
-        
-            # split the data into training and testing set
-            # train, test = train_test_split(self.reader_list, test_size = 0.2, random_state = 42)
+
+            # split the data into training and testing
+            # train, test = train_test_split(self.reader_list, test_size=0.2, random_state=42)
+            fold_reader_id_list = train['User_id'].tolist()
 
             # build reader dataframe and buying list
             reader_df_builder = ReaderDFBuilder(self.data_path)
             reader_df_builder.process()
-            train_reader_df, test_reader_df, train_bought_list, test_reader_list, test_bought_list = \
+            train_reader_df, test_reader_df, train_bought_list, test_buying_list, test_bought_list = \
                 reader_df_builder.build_reader_df(train['User_id'].tolist(), test['User_id'].tolist())
             
-            # print the length of training and testing set
-            if not __debug__:
-                print("Training Set Length: ", len(train_bought_list))
-                print("Testing Set Length: ", len(test_reader_list))
-                print("Training buying list length: ", len(train_reader_df))
-                print("Testing buying list length: ", len(test_reader_df))
+            # train the kMeans model
+            # model = NearestNeighbors(n_neighbors=self.k_nearest)
+            # model.fit(train_reader_df.drop(['User_id'], axis=1).to_numpy().tolist())
+            model = KMeans(n_clusters = self.cluster_num, random_state=0)
+            model.fit(train_reader_df.drop(['User_id'], axis=1).to_numpy().tolist())
 
-            # for each user in the testing set, find the top k similar users in the training set
-            # and find the books that similar users read
-            # then recommend the books to the target user
+            # criteria of each reader
             mrr_list = []
             map_list = []
             for idx, test_reader_id in enumerate(test['User_id'].tolist()):
-                similar_users = self.find_similar_users(test_reader_df[test_reader_df['User_id'] == test_reader_id], train_reader_df)
+                # get the df for test reader, and convert to list
+                test_df = test_reader_df[test_reader_df['User_id'] == test_reader_id]
+                # test_df = test_df.drop(['User_id'], axis=1).to_numpy().tolist()
+                # find the cluster
+                # knn_result = model.kneighbors(test_df, return_distance=True)
+                cluster = model.predict(test_df.drop(['User_id'], axis=1).to_numpy().tolist())[0]
+
+                # find the similar users in the same cluster
+                similar_users_idx = [i for i, x in enumerate(model.labels_) if x == cluster and fold_reader_id_list[i] != test_reader_id]
+
+                # get the similarity between the target user and similar users
+                similar_users = [(fold_reader_id_list[i], self.user_similarity(test_df, train_reader_df.iloc[[i]])) for i in similar_users_idx]
+
+                # get n users with highest similarity
+                similar_users = sorted(similar_users, key = lambda x: x[1], reverse = True)[:self.user_num]
+
+                # get the match reader id and similarity
+                # similar_users = [(fold_reader_id_list[knn_result[1][0][idx]], knn_result[0][0][idx]) for idx in range(self.cluster_num)]
+
                 # get the recommended books that similar users read
                 recommended_books = self.recommend_books(similar_users, train_bought_list, test_bought_list[test_reader_id][0])
-                # recommended_books = self.recommend_books_secret(similar_users, train_bought_list, test_bought_list[test_reader_id][0])
                 # calculate the mrr and map score for the target user
-                mrr_q = self.mrr_criteria(test_reader_list[test_reader_id][0], recommended_books)
-                # mrr_q = self.mrr_criteria_secret(test_reader_list[test_reader_id][0], recommended_books)
-                map_aveq, hit_location = self.map_criteria(test_reader_list[test_reader_id][0], recommended_books)
+                mrr_q = self.mrr_criteria(test_buying_list[test_reader_id][0], recommended_books)
+                map_aveq, hit_location = self.map_criteria(test_buying_list[test_reader_id][0], recommended_books)
 
                 mrr_list.append(mrr_q)
                 map_list.append(map_aveq)
                 print("{} th Target User: ".format(idx), test_reader_id)
                 if not __debug__:
-                    print("Target Books: ", test_reader_list[test_reader_id][0])
+                    print("Target Books: ", test_buying_list[test_reader_id][0])
                     print("Recommended Books: ", recommended_books)
-                    print("MRR: ", mrr_q)
-                    print("MAP: ", map_aveq)
-                    print("Hit Location of MAP: ", hit_location)
+                print("MRR: ", mrr_q)
+                print("MAP: ", map_aveq)
+                print("Hit Location: ", hit_location)
                 print("=========================================")
             print("[CV{}/{}] MRR Score: ".format(fold_round + 1, n), np.mean(mrr_list))
             print("[CV{}/{}] MAP Score: ".format(fold_round + 1, n), np.mean(map_list))
@@ -280,12 +270,13 @@ class UserBasedCF():
         print("each fold MRR Score: ", mrr_cv)
         print("each fold MAP Score: ", map_cv)
         print("=========================================")
-        print("Final Average MRR Score: ", np.mean(mrr_cv))
-        print("Final Average MAP Score: ", np.mean(map_cv))
+        print("Final MRR Score: ", np.mean(mrr_cv))
+        print("Final MAP Score: ", np.mean(map_cv))
         print("=========================================")
         print("Best MRR Score: ", np.max(mrr_cv))
         print("Best MAP Score: ", np.max(map_cv))
 
     def process(self):
-        self.load_data()
-        self.user_based_cf()
+        self.data = self.load_data()
+        # self.plot_pca()
+        self.kMeans()
